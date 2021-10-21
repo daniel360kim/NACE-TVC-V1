@@ -62,9 +62,9 @@ float Y_d = 0;
 
 
 //PID Gains
-double kp = 1.5;
-double ki = .15;
-double kd = 0.05;
+float kp = 1.5;
+float ki = .15;
+float kd = 0.05;
 
 Bmi088Accel accel(Wire,0x18);
 Bmi088Gyro gyro(Wire,0x68);
