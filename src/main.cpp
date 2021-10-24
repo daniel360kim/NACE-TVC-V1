@@ -4,18 +4,20 @@
 #include <Servo.h>
 #include <SimpleKalmanFilter.h>
 #include <BMP388_DEV.h>
+#include <Buzzer.h>
+
+Buzzer buzzer(5);
 
 BMP388_DEV bmp388;
 
 float temp, altitude, flightAltitude, groundAltitude, pressure;
+SimpleKalmanFilter KalmanFilterX(2.123, 2, 1);
+SimpleKalmanFilter KalmanFilterY(1.98, 2, 1);
+SimpleKalmanFilter KalmanFilterZ(1.98, 2, 1);
 
-SimpleKalmanFilter KalmanFilterX(2.123, 2, 0.01);
-SimpleKalmanFilter KalmanFilterY(1.98, 2, 0.01);
-SimpleKalmanFilter KalmanFilterZ(1.98, 2, 0.01);
-
-SimpleKalmanFilter KalmanFilterGx(0.5, 0.5, 0.1);
-SimpleKalmanFilter KalmanFilterGy(0.5, 0.5, 0.1);
-SimpleKalmanFilter KalmanFilterGz(0.5, 0.5, 0.1);
+SimpleKalmanFilter KalmanFilterGx(0.5, 0.5, 1);
+SimpleKalmanFilter KalmanFilterGy(0.5, 0.5, 1);
+SimpleKalmanFilter KalmanFilterGz(0.5, 0.5, 1);
 
 Servo servoX;
 Servo servoY;
@@ -62,18 +64,25 @@ float Y_d = 0;
 
 
 //PID Gains
-double kp = 1.5;
-double ki = .15;
-double kd = 0.05;
+float kp = 1.5;
+float ki = .15;
+float kd = 0.05;
 
 Bmi088Accel accel(Wire,0x18);
 Bmi088Gyro gyro(Wire,0x68);
 
 float previous_time, dt;
 float abort_time, flight_time, flight_starttime;
+uint8_t FTstCollected = 0;
+
 float bmpIntervalPrevious, bmpIntervalCurrent, intervalAltitude;
 float apogeeIntervalCurrent, apogeeIntervalPrevious;
 float pyroTime;
+
+float gxBias, gyBias, gzBias;
+float axBias, ayBias, azBias;
+float tempBias, presBias, altiBias;
+
 //States
 bool launchpad_idle = false;
 bool powered_flight = false;
@@ -85,11 +94,79 @@ bool landed = false;
 bool glcollected = false;
 bool ftcollected = false;
 
+int systemState = 0;
+
 const uint8_t redLED = 8;
 const uint8_t grnLED = 18;
 const uint8_t bluLED = 9;
 const u_int8_t pyroCont = A2;
 const u_int8_t pyro = 4;
+
+void calculateDrift(){
+  double gxIntegration;
+  double gyIntegration;
+  double gzIntegration;
+
+  double axIntegration;
+  double ayIntegration;
+  double azIntegration;
+
+  double tempIntegration;
+  double presIntegration;
+  double altiIntegration;
+  float Temp, calPressure, calAltitude;
+  
+  for(int i = 0; i < 1000; i++){
+    gyro.readSensor();
+    accel.readSensor();
+
+    bmp388.startForcedConversion();
+    bmp388.getMeasurements(Temp, calPressure, calAltitude);
+
+    double ax = accel.getAccelX_mss();
+    double ay = accel.getAccelY_mss();
+    double az = accel.getAccelZ_mss();
+    double gx = gyro.getGyroX_rads();
+    double gy = gyro.getGyroY_rads();
+    double gz = gyro.getGyroZ_rads();
+
+    gxIntegration = gxIntegration + gx;
+    gyIntegration = gyIntegration + gy;
+    gzIntegration = gzIntegration + gz;
+
+    axIntegration = axIntegration + ax;
+    ayIntegration = ayIntegration + ay;
+    azIntegration = azIntegration + az;
+
+    tempIntegration = tempIntegration + Temp;
+    presIntegration = presIntegration + calPressure;
+    altiIntegration = altiIntegration + calAltitude;
+  }
+  gxBias = gxIntegration / 1000;
+  gyBias = gyIntegration / 1000;
+  gzBias = gzIntegration / 1000;
+
+  axBias = axIntegration / 1000;
+  ayBias = ayIntegration / 1000;
+  azBias = azIntegration / 1000;
+
+  tempBias = tempIntegration / 1000;
+  presBias = presIntegration / 1000;
+  altiBias = altiIntegration / 1000;
+  
+}
+
+void indicateError() {
+  buzzer.begin(0);
+  digitalWrite(bluLED, LOW);
+  digitalWrite(grnLED, LOW);
+  digitalWrite(redLED, HIGH);
+
+  buzzer.sound (NOTE_C7, 100);
+
+  digitalWrite(redLED, LOW);
+  buzzer.end(100);
+}
 
 void setup() {
 
@@ -104,35 +181,93 @@ void setup() {
  digitalWrite(pyro, LOW);
  digitalWrite(12, HIGH);//disable auto-retry functionality on load driver
 
-  
+  buzzer.begin(0);
+  digitalWrite(redLED, HIGH);
+  buzzer.sound(NOTE_C5, 600);
+  digitalWrite(redLED, LOW);
+  delay(100);
+  digitalWrite(grnLED, HIGH);
+  buzzer.sound(NOTE_G4, 350);
+  delay(100);
+  digitalWrite(grnLED, LOW);
+  digitalWrite(bluLED, HIGH);
+  buzzer.sound(NOTE_G5, 700);
+  digitalWrite(grnLED, HIGH);
+  digitalWrite(redLED, HIGH);
   Serial.begin(115200);
   servoX.attach(11);
   servoY.attach(13);
   servoX.write(servoXstart);
   servoY.write(servoYstart);
   
-  int status;
+ uint8_t status;
   status = accel.begin();
   status = accel.setOdr(Bmi088Accel::ODR_400HZ_BW_40HZ);
   status = accel.setRange(Bmi088Accel::RANGE_12G);
   if(status < 0){
-    Serial.println("Accel Initialization Error");
-    while(1){}
+    Serial.println(F("Accel Initialization Error"));
+    while(1){
+      indicateError();
+    }
   }
   status = gyro.begin();
   status = gyro.setOdr(Bmi088Gyro::ODR_400HZ_BW_47HZ);
   status = gyro.setRange(Bmi088Gyro::RANGE_2000DPS);
   if(status < 0){
-    Serial.println("Gyro Initialization Error");
-    while(1){}
+    Serial.println(F("Gyro Initialization Error"));
+    while(1){
+      indicateError();
+    }
+  }
+  int continuity = analogRead(A2); //check for continuity at GPIO 18
+  if(continuity >= 250){
+    Serial.println(F("No Continuity Detected"));
+    while(1){
+      indicateError();
+    }
   }
   //Initialize BMP388, and get ground level reference
   bmp388.begin(BMP388_I2C_ALT_ADDR);
   bmp388.setPresOversampling(OVERSAMPLING_X8);
   bmp388.setTempOversampling(OVERSAMPLING_X2);
   bmp388.setIIRFilter(IIR_FILTER_16);
-  launchpad_idle = !launchpad_idle;
   
+  digitalWrite(grnLED, LOW);
+  digitalWrite(bluLED, LOW);
+  digitalWrite(redLED, HIGH);
+  buzzer.sound(NOTE_A4, 150);
+  
+  
+  calculateDrift();
+
+  digitalWrite(redLED, LOW);
+  digitalWrite(grnLED, HIGH);
+
+  digitalWrite(bluLED, LOW);
+  digitalWrite(grnLED, LOW);
+  digitalWrite(redLED, HIGH);
+
+  buzzer.sound(NOTE_A4, 150);
+
+  digitalWrite(redLED, LOW);
+  digitalWrite(grnLED, HIGH);
+
+  buzzer.sound(NOTE_D5, 150);
+
+  digitalWrite(grnLED, LOW);
+  digitalWrite(bluLED, HIGH);
+
+  buzzer.sound(NOTE_F5, 250);
+
+  digitalWrite(bluLED, LOW);
+  digitalWrite(grnLED, LOW);
+  digitalWrite(redLED, LOW);
+  servoX.attach(11);
+  servoY.attach(13);
+  servoX.write(servoXstart);
+  servoY.write(servoYstart);
+
+  systemState++; //move system to launchpad idle
 }
 void getScalar(float theta) {
   b[0] = cos(theta / 2);
@@ -144,21 +279,55 @@ void getVector(float x, float y, float z, float quatNorm, float theta) {
   b[3] = (z / quatNorm) * sin(theta / 2);
 }
 
-void abort(){
-  abort_state = !abort_state;
+void abortFlight(){
+  systemState = 6;
   digitalWrite(pyro, HIGH);
   servoX.detach();
   servoY.detach();
   //file.close();
+  digitalWrite(bluLED, HIGH);
+  digitalWrite(grnLED, HIGH);
+  digitalWrite(redLED, HIGH);
+  while(1){
+  }
+}
+
+int checkOri(float Y, float Z){
+ uint8_t result = 0;
+ if(Y >= 30 || Y <= -30){
+   if(abort_armed == true){
+     result = 1;
+   }
+ }
+
+ if(X >= 30 || X <= -30){
+   if(abort_armed == true){
+     result = 1;
+   }
+ }
+ return result;
+}
+
+void flightTime() {
+  if(systemState >= 2){
+    if(systemState == 2){
+      if(FTstCollected == 0)
+      flight_starttime = micros();
+      FTstCollected++;
+    }
+    else{
+      flight_time = micros() - flight_starttime;
+    }
+  }
 }
 
 void loop()
 {
 
  dt = (micros() - previous_time) / 1000000;
- previous_time = micros(); 
- flight_time = micros() - flight_starttime;
-
+ previous_time = micros();
+flightTime();
+ 
  accel.readSensor();
  gyro.readSensor();
  
@@ -169,14 +338,20 @@ void loop()
  float rgy = gyro.getGyroY_rads();
  float rgz = gyro.getGyroZ_rads();
 
-  // calculate the estimated value with Kalman Filter
  float ax = KalmanFilterX.updateEstimate(rax);
  float ay = KalmanFilterY.updateEstimate(ray);
  float az = KalmanFilterZ.updateEstimate(raz);
  float gx = KalmanFilterGx.updateEstimate(rgx);
  float gy = KalmanFilterGy.updateEstimate(rgy);
  float gz = KalmanFilterGz.updateEstimate(rgz);
-
+/*
+ ax = ax - axBias;
+ ay = ay - ayBias;
+ az = az - azBias;
+*/
+ gx = gx - gxBias;
+ gy = gy - gyBias;
+ gz = gz - gzBias;
 
  float quatNorm = sqrt(sq(gx) + sq(gy) + sq(gz));
  quatNorm = max(abs(quatNorm), 1e-12);
@@ -237,6 +412,10 @@ void loop()
  }*/
  bmp388.startForcedConversion();
  bmp388.getMeasurements(temp, pressure, altitude);
+ temp = temp - tempBias;
+ pressure = pressure - presBias;
+ altitude = altitude - altiBias;
+
  bmpIntervalCurrent = micros();
  apogeeIntervalCurrent = micros();
 
@@ -247,28 +426,32 @@ void loop()
    bmpIntervalPrevious = bmpIntervalCurrent;
    intervalAltitude = altitude;
  }
- if(launchpad_idle == true && ori_acc_prime[1] >= 2){
-   launchpad_idle = !launchpad_idle;
-   powered_flight = !powered_flight;
+
+ uint8_t abort = checkOri(Y,Z);
+ if(abort > 0 && abort_armed == true){
+   abortFlight();
+   abort = 0;
+ }
+ if(systemState == 1 && ori_acc_prime[1] >= 2){
+   systemState++; //move system on to powered flight mode
    abort_armed = !abort_armed;
    digitalWrite(bluLED, HIGH);
    digitalWrite(redLED, HIGH);
    digitalWrite(grnLED, HIGH);
+  
  }
  
- if(powered_flight == true && ori_acc_prime[1] <= 2){
-   powered_flight = !powered_flight;
-   unpowered_flight = !unpowered_flight;
+ if(systemState == 2 && ori_acc_prime[1] <= 2){
+   systemState++; //move system on to unpowered coast
    digitalWrite(bluLED, HIGH);
    digitalWrite(redLED, LOW);
    digitalWrite(grnLED, LOW);
    
  }
 
- if(apogeeIntervalCurrent - apogeeIntervalPrevious >= apogeeCheck && unpowered_flight == true){
+ if(apogeeIntervalCurrent - apogeeIntervalPrevious >= apogeeCheck && systemState == 3){
    if(intervalAltitude > altitude + 0.5){
-     unpowered_flight = !unpowered_flight;
-     descent = !descent;
+     systemState++; //move system to descent
     digitalWrite(bluLED, LOW);
     digitalWrite(grnLED, HIGH);
     digitalWrite(pyro, HIGH);
@@ -277,13 +460,14 @@ void loop()
  }
 
  
- if(micros() >= pyroTime + 20000000  && descent == true){
-   landed = !landed;
-   descent = !descent;
+ if(micros() >= pyroTime + 20000000  && systemState == 4){
+    systemState++; //move system on to landed
     digitalWrite(9, HIGH);//turn on all three LEDS (white)
     digitalWrite(8, HIGH);
     digitalWrite(18, HIGH);
     digitalWrite(pyro, LOW);
+    buzzer.sound(NOTE_D7, 50);
+    buzzer.sound(NOTE_D5, 50);
     servoX.detach();
     servoY.detach();
     //file.close();
@@ -298,19 +482,6 @@ void loop()
       delay(10);
     }
  }
- 
- if(Y >= 30 || Y <= -30){
-   if(abort_armed == true){
-     abort();
-   }
- }
-
- if(X >= 30 || X <= -30){
-   if(abort_armed == true){
-     abort();
-   }
- }
- 
 
 
 errorX = Y - desired_angleX; 
@@ -337,7 +508,10 @@ previous_errorY = errorY;
 
     servoX.write(pwmX); 
     servoY.write(pwmY);
-
+    Serial.print(flight_time);
+    Serial.print("\t");
+    Serial.print(micros());
+    Serial.print("\t");
     Serial.print("Euler:  ");
     Serial.print(X);
     Serial.print("\t");
@@ -345,7 +519,13 @@ previous_errorY = errorY;
     Serial.print("\t");
     Serial.print(Z);
     Serial.print("\t");
-    Serial.print(pwmX);
+    Serial.print(ori_acc_prime[1]);
+    Serial.print("\t");
+    Serial.print(ori_acc_prime[2]);
+    Serial.print("\t");
+    Serial.print(ori_acc_prime[3]);
+    Serial.print("\t");
+    Serial.print(systemState);
     Serial.print("\n");
   
 
@@ -355,6 +535,5 @@ previous_errorY = errorY;
 
 
 }
-
 
 
