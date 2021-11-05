@@ -34,24 +34,24 @@ let rocketAngleSetpoint = 0; // deg
 
 // PID GAINS for rotation PID
 // My E12 Gimbal test use: 0.4, 0.1, 0.1
-const kp_tvc = 1.5;
-const ki_tvc = 0.5;
-const kd_tvc = 0.25;
+const kp_tvc = .55;
+const ki_tvc = 0.4;
+const kd_tvc = 0.2;
 
 // Info about your rocket.
 // Ideally you'd measure these in various ways
 
 //distance between center of mass and TVC pivot
 //doesn't affect rocket dimensions
-const tvc_to_COM = 0.23; // meters
+const tvc_to_COM = 0.152; // meters
 
 // More info on how to measure this here:
 // https://youtu.be/nwgd1CV__rs?t=93
 // const momentOfInertia = 0.00804; //  kg*m^2
-const momentOfInertia = 0.0142769549; //  kg*m^2
+const momentOfInertia = 0.015533; //  kg*m^2
 
 // Mass of rocket used in height calculations
-const mass = 0.63; // kg
+const mass = 0.666; // kg
 
 //max angle range of your TVC plus and minus
 // So 5 deg would be +/- 5 deg
@@ -259,7 +259,7 @@ const getDragForce = (velocity) => {
 // Measure this in real life by filming an LED
 // turning on right before you command your servo
 // to move. See how long that command takes.
-const servoDelaySec = 0.03; // sec
+const servoDelaySec = 0.075; // sec
 
 // Servo linkages for TVC can flex a bit
 // This variable affects the amplitude
@@ -268,7 +268,7 @@ const servoDelaySec = 0.03; // sec
 const tvcNoiseAmplitude = 0; // deg
 
 // Seconds between each PID call.
-const PIDLoopTime = 0.005036; // sec
+const PIDLoopTime = 0.01111; // sec
 
 // Use these to add noise and offset to the angle measurement
 // of the rocket.
@@ -290,8 +290,8 @@ let constantTorqueBias = 0; // N*m
 // Used to calculate wind torque.
 // This is special because it applies a sinusoidal value of torque
 // to the rocket. Look at the last graph.
-const windSinAmplitude = 0.1; // N*m
-const windSinFrequency = 0.2; // hz
+const windSinAmplitude = 0; // N*m
+const windSinFrequency = 0; // hz
 
 // Simulation stuff
 

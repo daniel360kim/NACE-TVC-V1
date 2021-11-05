@@ -7,6 +7,14 @@
 #include <Buzzer.h>
 #include <SD.h>
 
+struct Quaternion {
+ float w, x, y, z;
+};
+
+Quaternion A = {1, 0, 0, 0};
+Quaternion B = {1, 0, 0, 0};
+Quaternion Orientation = {1, 0, 0, 0};
+
 File file;
 #define FILE_BASE_NAME_DATA "Data" 
 const uint8_t BASE_NAME_SIZE_DATA = sizeof(FILE_BASE_NAME_DATA) - 1;
@@ -31,12 +39,7 @@ SimpleKalmanFilter KalmanFilterGz(0.5, 0.5, 1);
 Servo servoX;
 Servo servoY;
 
-float a[4] = {1, 0, 0, 0};
-float q[4] = {1, 0, 0, 0};
-float b[4] = {1, 0, 0, 0};
-float ori_acc_prime[4];
-float ori_acc[4];
-float quats_prime[4];
+float wfXa, wfYa, wfZa;
 float X, Y, Z;
 
 float PIDX, PIDY, errorX, errorY, previous_errorX, previous_errorY, pwmX, pwmY;
@@ -145,9 +148,6 @@ void indicateError() {
   }
 }
 
-void readVoltage(){
-
-}
 
 void setup() {
 
@@ -324,13 +324,13 @@ void setup() {
 }
 
 void getScalar(float theta) {
-  b[0] = cos(theta / 2);
+  B.w = cos(theta / 2);
 }
 
 void getVector(float x, float y, float z, float quatNorm, float theta) {
-  b[1] = (x / quatNorm) * sin(theta / 2);
-  b[2] = (y / quatNorm) * sin(theta / 2);
-  b[3] = (z / quatNorm) * sin(theta / 2);
+  B.x = (x / quatNorm) * sin(theta / 2);
+  B.y = (y / quatNorm) * sin(theta / 2);
+  B.z = (z / quatNorm) * sin(theta / 2);
 }
 
 void abortFlight(){
@@ -377,6 +377,17 @@ void flightTime() {
 
 }
 
+ Quaternion hamiltonProduct(Quaternion A, Quaternion B) {
+  Quaternion product;
+
+  product.w = (A.w * B.w) - (A.x * B.x) - (A.y * B.y) - (A.z * B.z);
+  product.x = (A.w * B.x) + (A.x * B.w) + (A.y * B.z) - (A.z * B.y);
+  product.y = (A.w * B.y) - (A.x * B.z) + (A.y * B.w) + (A.z * B.x);
+  product.z = (A.w * B.z) + (A.x * B.y) - (A.y * B.x) + (A.z * B.w);
+
+  return product;
+}
+
 void loop()
 {
 
@@ -418,37 +429,26 @@ void loop()
  getScalar(theta);
  getVector(gx, gy, gz, quatNorm, theta);
 
- a[0] = q[0];
- a[1] = q[1];
- a[2] = q[2];
- a[3] = q[3];
+ A.w = Orientation.w;
+ A.x = Orientation.x;
+ A.y = Orientation.y;
+ A.z = Orientation.z;
 
- q[0] = (a[0] * b[0]) - (a[1] * b[1]) - (a[2] * b[2]) - (a[3] * b[3]);
- q[1] = (a[0] * b[1]) + (a[1] * b[0]) + (a[2] * b[3]) - (a[3] * b[2]);
- q[2] = (a[0] * b[2]) - (a[1] * b[3]) + (a[2] * b[0]) + (a[3] * b[1]);
- q[3] = (a[0] * b[3]) + (a[1] * b[2]) - (a[2] * b[1]) + (a[3] * b[0]);
+ Quaternion Orientation = hamiltonProduct(A, B);
+ Quaternion accReadings = {0, ax, ay, az};
 
- quats_prime[0] = q[0];
- quats_prime[1] = -1 * q[1];
- quats_prime[2] = -1 * q[2];
- quats_prime[3] = -1 * q[3];
- 
- ori_acc[0] = q[0] * 0 - q[1] * ax - q[2] * ay - q[3] * az;
- ori_acc[1] = q[0] * ax + q[1] * 0 + q[2] * az - q[3] * ay;
- ori_acc[2] = q[0] * ay - q[1] * az + q[2] * 0 + q[3] * ax;
- ori_acc[3] = q[0] * az + q[1] * ay - q[2] * ax + q[3] * 0;
+Quaternion wF_acc = hamiltonProduct(Orientation, accReadings);
 
- //ori_acc_prime[0] = ori_acc[0] * q[0] - ori_acc[1] * q[1] * -1 - ori_acc[2] * q[2] * -1 - ori_acc[3] * q[3] * -1; this i commented out because it will always be zero
- ori_acc_prime[1] = (ori_acc[0] * q[1] * -1 + ori_acc[1] * q[0] + ori_acc[2] * q[3] * -1 - ori_acc[3] * q[2] * -1) - 9.81;
- ori_acc_prime[2] = ori_acc[0] * q[2] * -1 - ori_acc[1] * q[3] * -1 + ori_acc[2] * q[0] + ori_acc[3] * q[1] * -1;
- ori_acc_prime[3] = ori_acc[0] * q[3] * -1 + ori_acc[1] * q[2] * -1 - ori_acc[2] * q[1] * -1 + ori_acc[3] * q[0];
+ wfXa = (wF_acc.w * Orientation.x * -1 + wF_acc.x * Orientation.w + wF_acc.y * Orientation.z * -1 - wF_acc.z * Orientation.y * -1) - 9.81;
+ wfYa = wF_acc.w * Orientation.y * -1 - wF_acc.x * Orientation.z * -1 + wF_acc.y * Orientation.w + wF_acc.z * Orientation.x * -1;
+ wfZa = wF_acc.w * Orientation.z * -1 + wF_acc.x * Orientation.y * -1 - wF_acc.y * Orientation.x * -1 + wF_acc.z * Orientation.w;
 
- float sinr_cosp = 2 * (q[0] * q[1] + q[2] * q[3]);
- float cosr_cosp = 1 - 2 * (q[1] * q[1] + q[2] * q[2]);
+ float sinr_cosp = 2 * (Orientation.w * Orientation.x + Orientation.y * Orientation.z);
+ float cosr_cosp = 1 - 2 * (Orientation.x * Orientation.x + Orientation.y * Orientation.y);
      X = (atan2(sinr_cosp, cosr_cosp)) * RAD_TO_DEG;
   
      
- float sinp = 2 * (q[0] * q[2] - q[3] * q[1]);
+ float sinp = 2 * (Orientation.w * Orientation.y - Orientation.z * Orientation.x);
     if (abs(sinp) >= 1)
         Y = (copysignf(HALF_PI, sinp)) * RAD_TO_DEG;
     else
@@ -460,8 +460,8 @@ void loop()
  }
 */
 
- float siny_cosp = 2 * (q[0] * q[3] + q[1] * q[2]);
- float cosy_cosp = 1 - 2 * (q[2] * q[2] + q[3] * q[3]);
+ float siny_cosp = 2 * (Orientation.w * Orientation.z + Orientation.x * Orientation.y);
+ float cosy_cosp = 1 - 2 * (Orientation.y * Orientation.y + Orientation.z * Orientation.z);
     Z = (atan2(siny_cosp, cosy_cosp)) * RAD_TO_DEG;
  Z = fmod(Z, 360);/*
  if(Z < 0){
@@ -488,7 +488,7 @@ void loop()
     }
  }
  if(stateMachine_enable == true){
-    if(systemState == 1 && ori_acc_prime[1] >= 2){
+    if(systemState == 1 && wfXa >= 2){
       systemState++; //move system on to powered flight mode
       flightTime();
       abort_armed = !abort_armed;
@@ -498,7 +498,7 @@ void loop()
         }
  
  
-    if(systemState == 2 && ori_acc_prime[1] <= 2){
+    if(systemState == 2 && wfXa <= 2){
       systemState++; //move system on to unpowered coast
       flightTime();
       digitalWrite(bluLED, HIGH);
@@ -591,7 +591,7 @@ previous_errorY = errorY;
 
     servoX.write(pwmX); 
     servoY.write(pwmY);
-    /*
+    
     Serial.print(flight_time);
     Serial.print("\t");
     Serial.print(micros());
@@ -604,11 +604,11 @@ previous_errorY = errorY;
     Serial.print(Z);
     Serial.print("\t");
     Serial.print("Acc:   ");
-    Serial.print(ori_acc_prime[1]);
+    Serial.print(wfXa);
     Serial.print("\t");
-    Serial.print(ori_acc_prime[2]);
+    Serial.print(wfYa);
     Serial.print("\t");
-    Serial.print(ori_acc_prime[3]);
+    Serial.print(wfZa);
     Serial.print("\t");
     Serial.print("PWM:   ");
     Serial.print(pwmX);
@@ -617,7 +617,7 @@ previous_errorY = errorY;
     Serial.print("\t");
     Serial.print(systemState);
     Serial.print("\n");
-    */
+    
 
     file.println("0");
     file.print(",");
@@ -688,5 +688,3 @@ previous_errorY = errorY;
     file.print(PIDY, 5);
     file.print(",");
 }
-
-
