@@ -18,7 +18,7 @@ Quaternion Orientation = {1, 0, 0, 0};
 File file;
 #define FILE_BASE_NAME_DATA "Data" 
 const uint8_t BASE_NAME_SIZE_DATA = sizeof(FILE_BASE_NAME_DATA) - 1;
-char fileNamedata[] = FILE_BASE_NAME_DATA "00.csv";
+char fileNamedata[] = FILE_BASE_NAME_DATA "00.dat";
 
 #define FILE_BASE_NAME_STARTUP "START"
 const int BASE_NAME_SIZE_STARTUP = sizeof(FILE_BASE_NAME_STARTUP) - 1;
@@ -48,6 +48,14 @@ float PIDX, PIDY, errorX, errorY, previous_errorX, previous_errorY, pwmX, pwmY;
 float kp = .6;
 float ki = .1;
 float kd = 0.05;
+
+//"PID" Constants
+float X_p = 0;
+float Y_p = 0;
+float Y_i = 0;
+float X_i = 0;
+float X_d = 0;
+float Y_d = 0;
 
 bool stateMachine_enable = false;
 bool abortFunctionality_enable = false;
@@ -81,13 +89,6 @@ int servoYstart = servoX_offset;
 //Ratio between servo gear and tvc mount
 const uint8_t servoX_gear_ratio = 2;
 const uint8_t servoY_gear_ratio = 2;
-//"PID" Constants
-float X_p = 0;
-float Y_p = 0;
-float Y_i = 0;
-float X_i = 0;
-float X_d = 0;
-float Y_d = 0;
 
 const uint8_t redLED = 8;
 const uint8_t grnLED = 18;
@@ -150,7 +151,7 @@ void indicateError() {
 
 
 void setup() {
-
+ 
  pinMode(13, OUTPUT);
  pinMode(11, OUTPUT);
  pinMode(bluLED, OUTPUT);
@@ -180,7 +181,7 @@ void setup() {
   servoY.attach(13);
   servoX.write(servoXstart);
   servoY.write(servoYstart);
-    
+
   if (!SD.begin(SDchipSelect)) { //determine if SD card has any errors
     while(1){
       Serial.println(F("SD Card Error"));
@@ -222,10 +223,10 @@ void setup() {
     Serial.print(F(" open failed"));
     indicateError(); 
   }
-  
-  file.print("void,state,Time,fliTime,Temp,Pres,Alti,rax,ray,raz,fax,fay,faz,rgx,rgy,rgz,fgx,fgy,fgz,X,Y,Z,PX,IX,DX,PY,IY,DY,ErrorX,ErrorY,pwmX,pwmY,PIDX,PIDY");
+  /*
+  file.print("void,state,Time,fliTime,Temp,Pres,Alti,rax,ray,raz,fax,fay,faz,rgx,rgy,rgz,fgx,fgy,fgz,ErrorX,ErrorY,PIDX,PIDY");
   file.close();
-
+*/
   file = SD.open(fileNameStartup, FILE_WRITE);
   if (!file) {
     Serial.println(F(fileNameStartup));
@@ -311,7 +312,7 @@ void setup() {
   servoX.write(servoXstart);
   servoY.write(servoYstart);
 
-  file = SD.open(fileNamedata, FILE_WRITE);
+  file = SD.open(fileNamedata, O_WRITE | O_CREAT);
   if(!file){
     Serial.println(F(fileNamedata));
     Serial.print(F(" open failed"));
@@ -338,7 +339,7 @@ void abortFlight(){
   digitalWrite(pyro, HIGH);
   servoX.detach();
   servoY.detach();
-
+  file.flush();
   file.close();
 
   digitalWrite(bluLED, HIGH);
@@ -429,15 +430,15 @@ void loop()
  getScalar(theta);
  getVector(gx, gy, gz, quatNorm, theta);
 
+ Quaternion Orientation = hamiltonProduct(A, B);
  A.w = Orientation.w;
  A.x = Orientation.x;
  A.y = Orientation.y;
  A.z = Orientation.z;
 
- Quaternion Orientation = hamiltonProduct(A, B);
  Quaternion accReadings = {0, ax, ay, az};
 
-Quaternion wF_acc = hamiltonProduct(Orientation, accReadings);
+ Quaternion wF_acc = hamiltonProduct(Orientation, accReadings);
 
  wfXa = (wF_acc.w * Orientation.x * -1 + wF_acc.x * Orientation.w + wF_acc.y * Orientation.z * -1 - wF_acc.z * Orientation.y * -1) - 9.81;
  wfYa = wF_acc.w * Orientation.y * -1 - wF_acc.x * Orientation.z * -1 + wF_acc.y * Orientation.w + wF_acc.z * Orientation.x * -1;
@@ -453,20 +454,11 @@ Quaternion wF_acc = hamiltonProduct(Orientation, accReadings);
         Y = (copysignf(HALF_PI, sinp)) * RAD_TO_DEG;
     else
         Y = (asin(sinp)) * RAD_TO_DEG;
-      /*  
- Y = fmod(Y, 360);
- if(Y < 0){
-   Y += 360;
- }
-*/
 
  float siny_cosp = 2 * (Orientation.w * Orientation.z + Orientation.x * Orientation.y);
  float cosy_cosp = 1 - 2 * (Orientation.y * Orientation.y + Orientation.z * Orientation.z);
     Z = (atan2(siny_cosp, cosy_cosp)) * RAD_TO_DEG;
- Z = fmod(Z, 360);/*
- if(Z < 0){
-   Z += 360;
- }*/
+
  bmp388.startForcedConversion();
  bmp388.getMeasurements(temp, pressure, altitude);
 
@@ -548,13 +540,14 @@ Quaternion wF_acc = hamiltonProduct(Orientation, accReadings);
 
    flightTime();
 
-   if(flight_time >= 1.2e8){ //if threshold time reached
+   if(flight_time >= 1.2e7){ //if threshold time reached
      digitalWrite(grnLED, HIGH);
      digitalWrite(redLED, LOW);
      digitalWrite(bluLED, LOW);
   
      servoX.detach();
      servoY.detach();
+     file.flush();
      file.close();
      delay(100);
 
@@ -583,8 +576,14 @@ Y_d = kd*((errorY - previous_errorY)/dt);
 PIDX = X_p + X_i + X_d;
 PIDY = Y_p + Y_i + Y_d;
 
-pwmY = ((PIDY * servoY_gear_ratio) + servoX_offset);
-pwmX = ((PIDX * servoX_gear_ratio) + servoY_offset);  
+float cs = cos(Z * DEG_TO_RAD);
+float sn = sin(Z * DEG_TO_RAD);
+
+float trueZOut = (PIDX * sn) + (PIDY * cs);
+float trueYOut = (PIDX * cs) - (PIDY * sn); 
+
+pwmY = ((trueZOut * servoY_gear_ratio) + servoX_offset);
+pwmX = ((trueYOut * servoX_gear_ratio) + servoY_offset);  
 
 previous_errorX = errorX;
 previous_errorY = errorY; 
@@ -592,6 +591,8 @@ previous_errorY = errorY;
     servoX.write(pwmX); 
     servoY.write(pwmY);
     
+    
+  
     Serial.print(flight_time);
     Serial.print("\t");
     Serial.print(micros());
@@ -618,73 +619,58 @@ previous_errorY = errorY;
     Serial.print(systemState);
     Serial.print("\n");
     
-
-    file.println("0");
-    file.print(",");
-    file.print(systemState);
-    file.print(",");
-    file.print(micros());
-    file.print(",");
-    file.print(flight_time);
-    file.print(",");
-    file.print(temp);
-    file.print(",");
-    file.print(pressure, 3);
-    file.print(",");
-    file.print(altitude, 3);
-    file.print(",");
-    file.print(rax, 5);
-    file.print(",");
-    file.print(ray, 5);
-    file.print(",");
-    file.print(raz, 5);
-    file.print(",");
-    file.print(ax, 5);
-    file.print(",");
-    file.print(ay, 5);
-    file.print(",");
-    file.print(az, 5);
-    file.print(",");
-    file.print(rgx, 5);
-    file.print(",");
-    file.print(rgy, 5);
-    file.print(",");
-    file.print(rgz, 5);
-    file.print(",");
-    file.print(gx, 5);
-    file.print(",");
-    file.print(gy, 5);
-    file.print(",");
-    file.print(gz, 5);
-    file.print(",");
-    file.print(X, 5);
-    file.print(",");
-    file.print(Y, 5);
-    file.print(",");
-    file.print(Z, 5);
-    file.print(",");
-    file.print(X_p, 5);
-    file.print(",");
-    file.print(X_i, 5);
-    file.print(",");
-    file.print(X_d, 5);
-    file.print(",");
-    file.print(Y_p, 5);
-    file.print(",");
-    file.print(Y_i, 5);
-    file.print(",");
-    file.print(Y_d, 5);
-    file.print(",");
-    file.print(errorX, 5);
-    file.print(",");
-    file.print(errorY, 5);
-    file.print(",");
-    file.print(pwmX, 5);
-    file.print(",");
-    file.print(pwmY, 5);
-    file.print(",");
-    file.print(PIDX, 5);
-    file.print(",");
-    file.print(PIDY, 5);
-    file.print(",");
+    
+    file.write("\n");
+    file.write(",");
+    file.write(systemState);
+    file.write(",");
+    file.write(micros());
+    file.write(",");
+    file.write(flight_time);
+    file.write(",");
+    file.write(temp);
+    file.write(",");
+    file.write(pressure);
+    file.write(",");
+    file.write(altitude);
+    file.write(",");
+    file.write(rax);
+    file.write(",");
+    file.write(ray);
+    file.write(",");
+    file.write(raz);
+    file.write(",");
+    file.write(ax);
+    file.write(",");
+    file.write(ay);
+    file.write(",");
+    file.write(az);
+    file.write(",");
+    file.write(rgx);
+    file.write(",");
+    file.write(rgy);
+    file.write(",");
+    file.write(rgz);
+    file.write(",");
+    file.write(gx);
+    file.write(",");
+    file.write(gy);
+    file.write(",");
+    file.write(gz);
+    file.write(",");
+    file.write(X);
+    file.write(",");
+    file.write(Y);
+    file.write(",");
+    file.write(Z);
+    file.write(",");
+    file.write(errorX);
+    file.write(",");
+    file.write(errorY);
+    file.write(",");
+    file.write(PIDX);
+    file.write(",");
+    file.write(PIDY);
+    file.write(",");
+    
 }
