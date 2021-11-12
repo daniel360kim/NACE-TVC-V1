@@ -7,6 +7,7 @@
 #include <Buzzer.h>
 #include <SD.h>
 
+
 struct Quaternion {
  float w, x, y, z;
 };
@@ -18,7 +19,7 @@ Quaternion Orientation = {1, 0, 0, 0};
 File file;
 #define FILE_BASE_NAME_DATA "Data" 
 const uint8_t BASE_NAME_SIZE_DATA = sizeof(FILE_BASE_NAME_DATA) - 1;
-char fileNamedata[] = FILE_BASE_NAME_DATA "00.dat";
+char fileNamedata[] = FILE_BASE_NAME_DATA "00.csv";
 
 #define FILE_BASE_NAME_STARTUP "START"
 const int BASE_NAME_SIZE_STARTUP = sizeof(FILE_BASE_NAME_STARTUP) - 1;
@@ -44,6 +45,7 @@ float X, Y, Z;
 
 float PIDX, PIDY, errorX, errorY, previous_errorX, previous_errorY, pwmX, pwmY;
 
+unsigned long counter;
 //PID Gains//
 float kp = .6;
 float ki = .1;
@@ -57,7 +59,7 @@ float X_i = 0;
 float X_d = 0;
 float Y_d = 0;
 
-bool stateMachine_enable = false;
+bool stateMachine_enable = true;
 bool abortFunctionality_enable = false;
 
 Bmi088Accel accel(Wire,0x18);
@@ -81,8 +83,8 @@ bool abort_armed = false;
 const uint8_t desired_angleX = 0;//servoY
 const uint8_t desired_angleY = 0;//servoX
 //Offsets for tuning 
-const int32_t servoY_offset = 112;
-const int servoX_offset = 39;
+const int32_t servoY_offset = 47;
+const int servoX_offset = 126;
 //Position of servos through the startup function
 int servoXstart = servoY_offset * -1;
 int servoYstart = servoX_offset;
@@ -266,12 +268,7 @@ void setup() {
     indicateError();
     
   }
-  int continuity = analogRead(A2); //check for continuity at GPIO 18
-  if(continuity >= 250){
-    Serial.println(F("No Continuity Detected"));
-    indicateError();
-    
-  }
+
   //Initialize BMP388, and get ground level reference
   bmp388.begin(BMP388_I2C_ALT_ADDR);
   bmp388.setPresOversampling(OVERSAMPLING_X8);
@@ -339,7 +336,6 @@ void abortFlight(){
   digitalWrite(pyro, HIGH);
   servoX.detach();
   servoY.detach();
-  file.flush();
   file.close();
 
   digitalWrite(bluLED, HIGH);
@@ -465,8 +461,8 @@ void loop()
  bmpIntervalCurrent = micros();
  apogeeIntervalCurrent = micros();
 
- const float bmpInterval = 1000000;
- const float apogeeCheck = 1500000;
+ const float bmpInterval = 500000;
+ const float apogeeCheck = 500000;
 
  if(bmpIntervalCurrent - bmpIntervalPrevious >= bmpInterval) {
    bmpIntervalPrevious = bmpIntervalCurrent;
@@ -513,15 +509,15 @@ void loop()
     if(micros() >= pyroTime + 20000000  && systemState == 4){
         flightTime();
         systemState++; //move system on to landed
-        digitalWrite(9, HIGH);//turn on all three LEDS (white)
-        digitalWrite(8, HIGH);
-        digitalWrite(18, HIGH);
+        digitalWrite(bluLED, LOW);
+        digitalWrite(redLED, HIGH);
+        digitalWrite(grnLED, HIGH);
         digitalWrite(pyro, LOW);
         buzzer.sound(NOTE_D7, 50);
         buzzer.sound(NOTE_D5, 50);
         servoX.detach();
         servoY.detach();
-        //file.close();
+        file.close();
         delay(100);
         while(1){
           buzzer.sound(NOTE_D7, 50);
@@ -547,7 +543,6 @@ void loop()
   
      servoX.detach();
      servoY.detach();
-     file.flush();
      file.close();
      delay(100);
 
@@ -582,8 +577,8 @@ float sn = sin(Z * DEG_TO_RAD);
 float trueZOut = (PIDX * sn) + (PIDY * cs);
 float trueYOut = (PIDX * cs) - (PIDY * sn); 
 
-pwmY = ((trueZOut * servoY_gear_ratio) + servoX_offset);
-pwmX = ((trueYOut * servoX_gear_ratio) + servoY_offset);  
+pwmY = ((trueZOut * servoY_gear_ratio) + servoY_offset);
+pwmX = ((trueYOut * servoX_gear_ratio) + servoX_offset);  
 
 previous_errorX = errorX;
 previous_errorY = errorY; 
@@ -620,57 +615,65 @@ previous_errorY = errorY;
     Serial.print("\n");
     
     
-    file.write("\n");
-    file.write(",");
-    file.write(systemState);
-    file.write(",");
-    file.write(micros());
-    file.write(",");
-    file.write(flight_time);
-    file.write(",");
-    file.write(temp);
-    file.write(",");
-    file.write(pressure);
-    file.write(",");
-    file.write(altitude);
-    file.write(",");
-    file.write(rax);
-    file.write(",");
-    file.write(ray);
-    file.write(",");
-    file.write(raz);
-    file.write(",");
-    file.write(ax);
-    file.write(",");
-    file.write(ay);
-    file.write(",");
-    file.write(az);
-    file.write(",");
-    file.write(rgx);
-    file.write(",");
-    file.write(rgy);
-    file.write(",");
-    file.write(rgz);
-    file.write(",");
-    file.write(gx);
-    file.write(",");
-    file.write(gy);
-    file.write(",");
-    file.write(gz);
-    file.write(",");
-    file.write(X);
-    file.write(",");
-    file.write(Y);
-    file.write(",");
-    file.write(Z);
-    file.write(",");
-    file.write(errorX);
-    file.write(",");
-    file.write(errorY);
-    file.write(",");
-    file.write(PIDX);
-    file.write(",");
-    file.write(PIDY);
-    file.write(",");
+    
+    file.print("\n");
+    file.print(F(","));
+    file.print(systemState);
+    file.print(F(","));
+    file.print(micros());
+    file.print(F(","));
+    file.print(flight_time);
+    file.print(F(","));
+    file.print(temp);
+    file.print(F(","));
+    file.print(pressure);
+    file.print(F(","));
+    file.print(altitude);
+    file.print(F(","));
+    file.print(rax);
+    file.print(F(","));
+    file.print(ray);
+    file.print(F(","));
+    file.print(raz);
+    file.print(F(","));
+    file.print(ax);
+    file.print(F(","));
+    file.print(ay);
+    file.print(F(","));
+    file.print(az);
+    file.print(F(","));
+    file.print(rgx);
+    file.print(F(","));
+    file.print(rgy);
+    file.print(F(","));
+    file.print(rgz);
+    file.print(F(","));
+    file.print(gx);
+    file.print(F(","));
+    file.print(gy);
+    file.print(F(","));
+    file.print(gz);
+    file.print(F(","));
+    file.print(X);
+    file.print(F(","));
+    file.print(Y);
+    file.print(F(","));
+    file.print(Z);
+    file.print(F(","));
+    file.print(errorX);
+    file.print(F(","));
+    file.print(errorY);
+    file.print(F(","));
+    file.print(PIDX);
+    file.print(F(","));
+    file.print(PIDY);
+    file.print(F(","));
+
+    if (counter >= 1000){
+      file.flush();
+      counter = 0;
+    }
+
+    counter++;
     
 }
