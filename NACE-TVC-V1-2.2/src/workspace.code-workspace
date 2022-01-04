@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "..\\..\\..\\..\\..\\..\\Downloads\\Quaternion-Orientation-main"
+		},
+		{
+			"name": "Orientation Lib",
+			"path": "..\\..\\Orientation Lib"
+		},
+		{
+			"name": "NACE TVC V1",
+			"path": "..\\..\\NACE TVC V1"
+		},
+		{
+			"name": "NACE TVC V2",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}
