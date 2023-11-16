@@ -4,6 +4,7 @@
   <a href="https://github.com/daniel360kim/NACE-TVC-V1">
     <img src="Resources/logo.jpeg" alt="Logo" width="120" height="120">
   </a>
+  
 
   <h3 align="center">NACE Thurst Vector Control</h3>
 
@@ -11,6 +12,8 @@
     An awesome README template to jumpstart your projects!
     <br />
     <a href="https://youtu.be/ad6DS7cMQtw?si=ODGq_ugdBTZ1fljK"><strong>Watch the video »</strong></a>
+    <br />
+    <a href="https://www.nmas.org/wp-content/uploads/2023/03/2022_NMJS_Kim.pdf"><strong>Read the publication »</strong></a>
     <br />
     <br />
     <a href="https://github.com/daniel360kim/NACE-TVC-V1/tree/v2.2/FlightSoftware">Flight Software</a>
